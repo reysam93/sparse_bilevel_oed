@@ -1,0 +1,51 @@
+# RF Fashion tiny debug (frontier schema): smoke test of the fashion
+# adapter + price homotopy. Requires data/raw/fashion_mnist/ snapshot.
+experiment: rf_fashion_tiny_debug
+pipeline: c1_sparsity
+dataset: fashion_mnist_dct_14x14
+seeds: [0]
+problem:
+  generator: digits_dct
+  D: 196
+  M: 196
+  M0: 64
+  N_train: 32
+  N_val: 32
+  N_test: 64
+  sparsity: 0
+  snr_db: 30.0
+  generator_options: {dataset: fashion_mnist, pool: 2}
+estimator:
+  mu_grid: [0.01]
+  lambda_ratio_grid: [0.1]
+  tau_supp: 1.0e-6
+  rho: 1.0e-6
+  solver_max_iter: 1000
+  solver_tol: 1.0e-9
+methods: [dopt_greedy, proposed_ivb_l1]
+n_random_repeats: 5
+design_l1:
+  eta_c: 1.0
+  price_kind: concave
+  price_theta: 0.1
+  price_ramp_start: 0.1
+  price_ramp_ratio: 1.5
+  price_ramp_len: 8
+  price_iters_per_stage: 15
+  tau_w: 1.0e-3
+baseline_M0_grid: [48]
+proposed:
+  gamma_schedule: [0.3, 3.0]
+  outer_iters_per_stage: 15
+  alpha_init: 0.1
+  backtracking: true
+  max_halvings: 30
+  inner: {mode: log, T0: 5, c: 3.0}
+  diag_inner_steps: 100
+  diag_every: 15
+  init_solve_steps: 200
+  step_rule: per_block
+  gap_scale_mode: noise_normalized
+  polish_gamma_factors: []
+  n_restarts: 1
+timeout_seconds: 600

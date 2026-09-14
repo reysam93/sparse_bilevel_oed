@@ -1,0 +1,67 @@
+# C1 synthetic frontier (ICASSP Fig. 1): budget-free sparsity-priced IV-B
+# design on the E1 structured-blocks instance, strong-Lasso regime.
+# ONE run per seed: price-free gamma continuation (frozen configuration),
+# then a geometric concave-price micro-ramp at gamma_final; every price
+# stage with a new deployed cardinality is a frontier point. Baselines are
+# evaluated at the baseline_M0_grid cardinalities.
+experiment: c1_synth_frontier_10seed
+pipeline: c1_sparsity
+dataset: sparse_linear_structured_blocks_e1
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+problem:
+  generator: structured_blocks
+  D: 80
+  M: 240
+  M0: 40            # nominal, used only for the lambda_max uniform design
+  N_train: 64
+  N_val: 64
+  N_test: 512
+  sparsity: 8
+  snr_db: 20.0
+  generator_options:
+    n_blocks: 4
+    block_gain: 5.0
+    frequent_blocks: [0, 1]
+    frac_frequent: 0.7
+
+estimator:
+  mu_grid: [0.1]
+  lambda_ratio_grid: [0.1]
+  tau_supp: 1.0e-6
+  rho: 1.0e-6
+  solver_max_iter: 2000
+  solver_tol: 1.0e-10
+
+methods: [random, leverage, dopt_greedy, aopt_greedy, diagnostic_full_design, proposed_ivb_l1]
+n_random_repeats: 20
+
+design_l1:
+  eta_c: 1.0
+  price_kind: concave
+  price_theta: 0.1
+  price_ramp_start: 0.05
+  price_ramp_ratio: 1.18
+  price_ramp_len: 40
+  price_iters_per_stage: 20
+  tau_w: 1.0e-3
+
+baseline_M0_grid: [15, 20, 25, 30, 35, 40, 50, 60, 80, 120]
+
+proposed:
+  gamma_schedule: [0.1, 0.3, 1.0, 3.0, 10.0, 30.0]
+  outer_iters_per_stage: 60
+  alpha_init: 0.1
+  backtracking: true
+  max_halvings: 30
+  inner: {mode: log, T0: 10, c: 5.0}
+  diag_inner_steps: 500
+  diag_every: 30
+  init_solve_steps: 1000
+  step_rule: per_block
+  gap_scale_mode: noise_normalized
+  polish_gamma_factors: []
+  n_restarts: 1
+
+timeout_seconds: 1800

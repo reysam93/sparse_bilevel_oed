@@ -1,0 +1,63 @@
+# C1 tiny debug (ICASSP sparsity variant): smoke test of design_mode=box_l1.
+# Minutes, 1 seed. Not scientific output.
+experiment: c1_tiny_debug
+pipeline: c1_sparsity
+dataset: sparse_linear_structured_blocks_e1
+
+seeds: [0]
+
+problem:
+  generator: structured_blocks
+  D: 40
+  M: 100
+  M0: 15            # nominal, used only for the lambda_max uniform design
+  N_train: 16
+  N_val: 16
+  N_test: 64
+  sparsity: 4
+  snr_db: 20.0
+  generator_options:
+    n_blocks: 4
+    block_gain: 5.0
+    frequent_blocks: [0, 1]
+    frac_frequent: 0.7
+
+estimator:
+  mu_grid: [0.1]
+  lambda_ratio_grid: [0.1]
+  tau_supp: 1.0e-6
+  rho: 1.0e-6
+  solver_max_iter: 1000
+  solver_tol: 1.0e-9
+
+methods: [dopt_greedy, random, proposed_ivb_l1]
+n_random_repeats: 5
+
+design_l1:
+  eta_c: 1.0
+  price_kind: concave
+  price_theta: 0.1
+  price_ramp_start: 0.3
+  price_ramp_ratio: 1.6
+  price_ramp_len: 12
+  price_iters_per_stage: 10
+  tau_w: 1.0e-3
+
+baseline_M0_grid: [15, 30]
+
+proposed:
+  gamma_schedule: [0.3, 3.0]
+  outer_iters_per_stage: 15
+  alpha_init: 0.1
+  backtracking: true
+  max_halvings: 30
+  inner: {mode: log, T0: 5, c: 3.0}
+  diag_inner_steps: 100
+  diag_every: 5
+  init_solve_steps: 200
+  step_rule: per_block
+  gap_scale_mode: noise_normalized
+  polish_gamma_factors: [3.0]
+  n_restarts: 1
+
+timeout_seconds: 300

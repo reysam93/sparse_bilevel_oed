@@ -1,0 +1,9 @@
+# Scientific stack for the ICASSP experiments (same ranges as the main repo).
+numpy>=1.26,<3.0
+scipy>=1.11,<2.0
+scikit-learn>=1.3,<2.0
+pandas>=2.0,<3.0
+PyYAML>=6.0,<7.0
+matplotlib>=3.8,<4.0
+# tests only
+pytest>=7.0

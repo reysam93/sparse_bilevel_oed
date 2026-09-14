@@ -1,0 +1,66 @@
+# RF Fashion-MNIST frontier (ICASSP Fig. 2): budget-free sparsity-priced
+# IV-B pixel selection, 14x14 pooled images (D = M = 196), orthonormal
+# 2D-DCT basis, local snapshot data/raw/fashion_mnist/. One price-homotopy
+# run per seed (concave price, adaptive bisection); baselines at the
+# baseline_M0_grid cardinalities.
+experiment: rf_fashion_frontier_lr01_10seed
+pipeline: c1_sparsity
+dataset: fashion_mnist_dct_14x14
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+problem:
+  generator: digits_dct
+  D: 196
+  M: 196
+  M0: 64            # nominal, used only for the lambda_max uniform design
+  N_train: 128
+  N_val: 128
+  N_test: 512
+  sparsity: 0
+  snr_db: 30.0
+  generator_options:
+    dataset: fashion_mnist
+    pool: 2
+
+estimator:
+  mu_grid: [0.01]
+  lambda_ratio_grid: [0.1]
+  tau_supp: 1.0e-6
+  rho: 1.0e-6
+  solver_max_iter: 2000
+  solver_tol: 1.0e-9
+
+methods: [random, leverage, dopt_greedy, aopt_greedy, diagnostic_full_design, proposed_ivb_l1]
+n_random_repeats: 20
+
+design_l1:
+  eta_c: 1.0
+  price_kind: concave
+  price_theta: 0.1
+  price_ramp_start: 0.05
+  price_ramp_ratio: 1.25
+  price_ramp_len: 24
+  price_iters_per_stage: 60
+  tau_w: 1.0e-3
+
+baseline_M0_grid: [16, 24, 32, 40, 48, 64, 96, 128]
+
+proposed:
+  gamma_schedule: [0.1, 0.3, 1.0, 3.0, 10.0, 30.0]
+  outer_iters_per_stage: 60
+  alpha_init: 0.1
+  backtracking: true
+  max_halvings: 30
+  inner: {mode: log, T0: 10, c: 5.0}
+  diag_inner_steps: 300
+  diag_every: 30
+  init_solve_steps: 500
+  step_rule: per_block
+  gap_scale_mode: noise_normalized
+  polish_gamma_factors: []
+  n_restarts: 1
+  avalanche_frac: 0.2
+  max_price_bisect: 32
+
+timeout_seconds: 3600
