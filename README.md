@@ -71,6 +71,9 @@ Each run writes one directory per method and cardinality under `results/<experim
 |---|---|---|
 | Fig. 1(a): synthetic sparse linear problem | `configs/c1_synth_frontier_10seed.yaml` | `c1_synth_frontier_10seed` |
 | Fig. 1(b)-(c) and Table 1: Fashion-MNIST pixel selection | `configs/rf_fashion_frontier_lr01_10seed.yaml` | `rf_fashion_frontier_lr01_10seed` |
+| Variant (not in the paper): synthetic case with heterogeneous sensor energies (per-sensor gains spanning 20 dB) and clusters of correlated sensors | `configs/c1_synth_frontier_10seed_v2.yaml` | `c1_synth_frontier_10seed_v2` |
+
+The header of `c1_synth_frontier_10seed_v2.yaml` describes exactly how its data generation differs from the paper's synthetic case (generator options `row_gain`, `gain_range_db`, `row_corr`, `rho`, `cluster_size` of `generate_sparse_linear_blocks`).
 
 Both batches are "one price-homotopy run per seed" plus the baselines on a grid of cardinalities, over 10 seeds. Use the time-budgeted, resumable runner: it processes grid points in a deterministic order, skips those that already have a `metrics.csv`, and stops cleanly when the time budget is about to be exceeded. Re-invoke it until it prints `ALL DONE`:
 

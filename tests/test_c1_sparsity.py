@@ -131,6 +131,42 @@ def test_generators_provide_paired_ul_acquisition():
     assert abs(np.corrcoef(e_ll.ravel(), e_ul.ravel())[0, 1]) < 0.1
 
 
+def test_blocks_generator_v2_row_gain_and_cluster_correlation():
+    """v2 options: per-sensor gains spread over gain_range_db, rows within a
+    cluster correlated ~rho, rows of different clusters ~uncorrelated; the
+    default options leave the original generator untouched."""
+    from src.problems.sparse_linear import generate_sparse_linear_blocks
+
+    kw = dict(D=40, M=120, M0=20, N_train=4, N_val=4, N_test=4, sparsity=3,
+              snr_db=20.0)
+    base = generate_sparse_linear_blocks(np.random.default_rng(1), **kw)
+    same = generate_sparse_linear_blocks(np.random.default_rng(1), **kw,
+                                         row_corr="none", row_gain="none")
+    assert np.array_equal(base.X, same.X) and np.array_equal(base.Y_test,
+                                                             same.Y_test)
+    assert np.allclose(np.linalg.norm(base.X, axis=1), 1.0)
+
+    v2 = generate_sparse_linear_blocks(
+        np.random.default_rng(1), **kw, row_corr="cluster", rho=0.7,
+        cluster_size=5, row_gain="loguniform", gain_range_db=20.0)
+    energy_db = 20 * np.log10(np.linalg.norm(v2.X, axis=1))
+    assert energy_db.max() - energy_db.min() > 15.0       # ~20 dB spread
+    assert abs(energy_db.max()) <= 10.0 + 1e-9 and abs(energy_db.min()) <= 10.0 + 1e-9
+    Xn = v2.X / np.linalg.norm(v2.X, axis=1, keepdims=True)
+    fam0 = Xn[:30]                                        # family 0: 6 clusters of 5
+    G = fam0 @ fam0.T
+    within = [G[i, j] for i in range(30) for j in range(i + 1, 30)
+              if i // 5 == j // 5]
+    between = [G[i, j] for i in range(30) for j in range(i + 1, 30)
+               if i // 5 != j // 5]
+    assert 0.5 < np.mean(within) < 0.9
+    assert abs(np.mean(between)) < 0.15
+    assert v2.meta["row_corr"] == "cluster" and v2.meta["row_gain"] == "loguniform"
+    with pytest.raises(ValueError):
+        generate_sparse_linear_blocks(np.random.default_rng(1), **kw,
+                                      row_corr="ar1")
+
+
 def test_run_proposed_ul_uses_paired_measurements():
     """With Y_ul the UL criterion is evaluated on Y_ul (not on the LL data),
     the design changes, and a shape mismatch is rejected."""

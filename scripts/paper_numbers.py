@@ -28,6 +28,7 @@ from make_c1_figures import (BASELINES, PROPOSED, improvement_table,  # noqa: E4
 
 BINS = {
     "c1_synth_frontier_10seed": ([0, 40, 10**6], ["M1<=40", "M1>40"]),
+    "c1_synth_frontier_10seed_v2": ([0, 40, 10**6], ["M1<=40", "M1>40"]),
     "rf_fashion_frontier_lr01_10seed": (
         [0, 32, 48, 64, 10**6], ["M1<=32", "32<M1<=48", "48<M1<=64", "M1>64"]),
 }

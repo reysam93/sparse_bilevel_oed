@@ -171,20 +171,55 @@ def generate_sparse_linear_blocks(
     block_gain: float = 5.0,
     frequent_blocks: tuple[int, ...] = (0, 1),
     frac_frequent: float = 0.7,
+    row_corr: str = "none",
+    rho: float = 0.0,
+    cluster_size: int = 1,
+    row_gain: str = "none",
+    gain_range_db: float = 0.0,
 ) -> SparseLinearData:
     """E1 generator (plan 6-E1): 4 coordinate blocks; M rows split into
     n_blocks sensor families, family f drawn N(0, Sigma_f) with std 1 on its
     own block and 1/block_gain elsewhere, then row-normalized. Signals have
     structured support: ~70% of actives in the two frequent blocks.
+
+    Optional row structure (v2 synthetic experiment, 2026-09-18; the
+    defaults reproduce the original generator bit for bit):
+
+    * ``row_corr="cluster"``: within each family, consecutive groups of
+      ``cluster_size`` rows share a common component,
+      x_i = sqrt(rho) c_g + sqrt(1 - rho) z_i with c_g, z_i ~ N(0, Sigma_f),
+      so rows of a cluster have correlation ~rho (redundant sensors);
+      rho = 0 gives independent rows, rho = 1 exact replicas.
+    * ``row_gain="loguniform"``: after row normalization each row is scaled
+      by a per-sensor gain g_i = 10^(u_i / 20) with u_i ~ U[-r/2, r/2] dB,
+      r = ``gain_range_db``, i.e. the per-sensor power (and SNR, since R is
+      shared) spans ``gain_range_db`` dB uniformly in dB. Row energies then
+      differ, so energy-based criteria (leverage, D/A-opt) can rank rows.
     """
     blocks = _blocks(D, n_blocks)
     rows_per_family = np.array_split(np.arange(M), n_blocks)
+    if row_corr not in ("none", "cluster"):
+        raise ValueError(f"unknown row_corr '{row_corr}'")
+    if row_gain not in ("none", "loguniform"):
+        raise ValueError(f"unknown row_gain '{row_gain}'")
+    if not 0.0 <= rho <= 1.0:
+        raise ValueError(f"rho must be in [0, 1], got {rho}")
     X = np.empty((M, D))
     for f, rows in enumerate(rows_per_family):
         std = np.full(D, 1.0 / block_gain)
         std[blocks[f]] = 1.0
-        X[rows] = rng.standard_normal((len(rows), D)) * std
+        Z = rng.standard_normal((len(rows), D)) * std
+        if row_corr == "cluster" and rho > 0.0:
+            n_cl = int(np.ceil(len(rows) / max(1, int(cluster_size))))
+            C = rng.standard_normal((n_cl, D)) * std
+            g = np.arange(len(rows)) // max(1, int(cluster_size))
+            Z = np.sqrt(rho) * C[g] + np.sqrt(1.0 - rho) * Z
+        X[rows] = Z
     X /= np.linalg.norm(X, axis=1, keepdims=True)
+    gains_db = np.zeros(M)
+    if row_gain == "loguniform" and gain_range_db > 0.0:
+        gains_db = rng.uniform(-gain_range_db / 2, gain_range_db / 2, size=M)
+        X *= (10.0 ** (gains_db / 20.0))[:, None]
 
     frequent_coords = np.concatenate([blocks[b] for b in frequent_blocks])
     beta_train = _structured_support_signals(
@@ -202,6 +237,10 @@ def generate_sparse_linear_blocks(
         "n_blocks": n_blocks, "block_gain": block_gain,
         "frequent_blocks": list(frequent_blocks),
         "frac_frequent": frac_frequent,
+        "row_corr": row_corr, "rho": rho, "cluster_size": int(cluster_size),
+        "row_gain": row_gain, "gain_range_db": gain_range_db,
+        "row_gain_db_min": float(gains_db.min()),
+        "row_gain_db_max": float(gains_db.max()),
     }
     return _finalize(rng, X, beta_train, beta_val, beta_test, M0, snr_db, meta)
 
