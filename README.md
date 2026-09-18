@@ -1,141 +1,137 @@
-# ICASSP experiments: "Sparse Experimental Design for Nonsmooth Estimators via Bilevel Optimization"
+# Sparse Experimental Design for Nonsmooth Estimators via Bilevel Optimization
 
-Self-contained code, configurations, data and results for the two numerical
-experiments of the ICASSP companion paper (A. G. Marques and S. Rey). This
-folder is a curated copy of the parts of the main repository that these two
-experiments use; it runs on its own, without access to the rest of the
-repository.
+Code for the numerical experiments of
 
-Everything is driven by two YAML configs:
+> A. G. Marques and S. Rey, *Sparse Experimental Design for Nonsmooth Estimators via Bilevel Optimization*, submitted to ICASSP 2027.
 
-| Paper item | Config | Results folder (shipped) |
+The repository is self-contained: it runs with a standard scientific Python stack, needs no network access, and reproduces the two experiments of the paper (a synthetic sparse linear inverse problem and pixel selection on Fashion-MNIST) from two YAML configuration files.
+
+## 1. What the code does
+
+Optimal experimental design (OED) chooses which of `M` candidate measurements to acquire. Classical OED scores a design through the Fisher information matrix of a linear-Gaussian model, which ignores the estimator that will actually process the data. This code treats OED as a **bilevel optimization problem** whose lower level is the *exact* nonsmooth estimator that is deployed (a design-weighted elastic net / Lasso) and whose upper level scores the resulting reconstructions.
+
+Main ingredients, with the corresponding modules:
+
+* **Lower level (LL).** For each training instance `n`, the design-weighted elastic net
+  `beta_n*(w) = argmin_beta  1/2 sum_i (w_i / R_ii) (y_{n,i} - x_i^T beta)^2 + mu/2 ||beta||^2 + lambda ||beta||_1`,
+  where `w in [0,1]^M` are continuous acquisition weights. Solved by FISTA (`src/solvers/lasso.py`).
+* **Upper level (UL).** The prediction risk of the reconstructions over the `M` candidate measurements, plus a **concave sparsity price** `eta * sum_i w_i / (w_i + theta)` on the weights. No cardinality budget is imposed: a measurement survives only if its estimator-aware value exceeds its price, so *how many* measurements are kept is an outcome of the optimization.
+* **Single-loop algorithm.** A value-function penalty reformulation replaces the LL optimality constraint by a penalized optimality gap. The resulting single-level problem is solved by proximal gradient on the design `w` and on free reconstruction copies `B`, using only inexact warm-started LL solves; no hypergradient or differentiation through the nonsmooth solution map is needed (`src/methods/proposed.py`, function `run_proposed` with `design_mode="box_l1"`).
+* **Price homotopy.** A continuation in the penalty parameter `gamma` is run price-free from the full design, then the price `eta` is ramped geometrically. Every price stage whose deployed cardinality changes yields one design, so a single run traces the whole cardinality-vs-accuracy frontier. An adaptive safeguard rolls back and bisects the price when a stage prunes too many measurements at once.
+* **Baselines.** Random selection, leverage (row-norm) sampling, and greedy D- and A-optimal selection on the information matrix (`src/methods/baselines.py`).
+* **Fair evaluation.** Every design, from every method, is evaluated with the same deployed elastic net on the same independent test instances (`src/evaluation/`).
+
+## 2. Repository layout
+
+```
+configs/      YAML configurations (two paper runs, two small smoke tests)
+data/         Fashion-MNIST snapshot (70000 x 28 x 28 uint8) and its provenance README
+scripts/      command-line entry points (see Sections 4 and 5)
+src/          library code, imported as `src.*`
+  config/       YAML loading and validation
+  problems/     data generators: synthetic structured-block problem, Fashion-MNIST in a 2-D DCT basis
+  solvers/      weighted elastic-net (FISTA, batched over instances) and ridge solvers
+  methods/      proposed price-homotopy method and the classical baselines
+  pipelines/    the experiment pipeline `c1_sparsity` (data -> baselines -> proposed -> evaluation)
+  evaluation/   deployed evaluation on test instances and metrics
+  figures/      shared plotting conventions
+  utils/        seeding, projections, result I/O, logging
+tests/        pytest smoke tests
+results/      created by the runners (not versioned)
+figures/      created by the figure script (not versioned)
+```
+
+## 3. Installation
+
+Python 3.10 or newer.
+
+```bash
+pip install -r requirements.txt
+python -m pytest tests/          # 6 tests, a few seconds
+```
+
+Dependencies: numpy, scipy, scikit-learn, pandas, PyYAML, matplotlib (pytest for the tests).
+
+Fashion-MNIST is shipped as a local snapshot in `data/raw/fashion_mnist/` (MIT-licensed data from [zalandoresearch/fashion-mnist](https://github.com/zalandoresearch/fashion-mnist), see the README in that folder). The data loader uses it and never downloads anything.
+
+## 4. Quick start
+
+A small end-to-end run (one seed, reduced sizes, about a minute) that exercises the whole pipeline:
+
+```bash
+python scripts/run_experiment.py --config configs/c1_tiny_debug.yaml
+python scripts/run_experiment.py --config configs/rf_fashion_tiny_debug.yaml
+```
+
+Each run writes one directory per method and cardinality under `results/<experiment>/`, containing `config.yaml`, `metrics.csv` (one row per evaluated design), the saved designs (`*.npy`), a `log.txt` and, for the proposed method, `training_curves.csv`.
+
+## 5. Reproducing the paper experiments
+
+| Paper item | Config | Experiment name |
 |---|---|---|
-| Fig. 1(a), sparse linear test case | `configs/c1_synth_frontier_10seed.yaml` | `results/c1_synth_frontier_10seed/` |
-| Fig. 1(b)-(c) and Table 1, Fashion-MNIST | `configs/rf_fashion_frontier_lr01_10seed.yaml` | `results/rf_fashion_frontier_lr01_10seed/` |
+| Fig. 1(a): synthetic sparse linear problem | `configs/c1_synth_frontier_10seed.yaml` | `c1_synth_frontier_10seed` |
+| Fig. 1(b)-(c) and Table 1: Fashion-MNIST pixel selection | `configs/rf_fashion_frontier_lr01_10seed.yaml` | `rf_fashion_frontier_lr01_10seed` |
 
-`configs/c1_tiny_debug.yaml` and `configs/rf_fashion_tiny_debug.yaml` are
-small smoke tests (seconds) with the same schema.
+Both batches are "one price-homotopy run per seed" plus the baselines on a grid of cardinalities, over 10 seeds. Use the time-budgeted, resumable runner: it processes grid points in a deterministic order, skips those that already have a `metrics.csv`, and stops cleanly when the time budget is about to be exceeded. Re-invoke it until it prints `ALL DONE`:
 
-## 1. Setup
+```bash
+python scripts/run_c1_chunk.py --config configs/c1_synth_frontier_10seed.yaml --max-seconds 600
+python scripts/run_c1_chunk.py --config configs/rf_fashion_frontier_lr01_10seed.yaml --max-seconds 600
+```
 
-Python 3.10+ and the packages in `requirements.txt`:
+Two workers can share a batch with `--stride 2 --offset 0` and `--stride 2 --offset 1` (set `OMP_NUM_THREADS=1` per worker so they do not compete for cores).
 
-    pip install -r requirements.txt
+Approximate cost on a laptop CPU: under one CPU-hour for the synthetic batch and about two CPU-hours for Fashion-MNIST. Most of it goes to the baselines, which need one evaluation per cardinality; the ten price-homotopy runs take about 3 minutes (synthetic) and 18 minutes (Fashion-MNIST) in total.
 
-No network access is needed: Fashion-MNIST is shipped as a local snapshot
-(`data/raw/fashion_mnist/`, see the README there for provenance and license),
-and the loader prefers it over any download.
+Once a batch is complete, rebuild the figures and the paired statistics quoted in the paper:
 
-Quick check (6 tests, a few seconds):
-
-    python -m pytest tests/
-
-## 2. Regenerating the paper figures from the shipped results
-
-The `results/` folders contain the raw per-run outputs of the 10-seed batches
-used in the paper (one directory per grid point with `config.yaml`,
-`metrics.csv`, training curves and the saved designs). To rebuild the figures
-and the numbers quoted in the text:
-
-    python scripts/make_c1_figures.py --experiment c1_synth_frontier_10seed
-    python -c "import sys; sys.path.insert(0,'.'); sys.path.insert(0,'scripts'); from make_c1_figures import fashion_main; fashion_main('rf_fashion_frontier_lr01_10seed')"
+```bash
+python scripts/make_c1_figures.py --experiment c1_synth_frontier_10seed
+python -c "import sys; sys.path[:0]=['.','scripts']; from make_c1_figures import fashion_main; fashion_main('rf_fashion_frontier_lr01_10seed')"
+```
 
 Outputs go to `figures/<experiment>/`:
 
-* `nmse_vs_cardinality.{pdf,png}` + `_data.csv`: Fig. 1(a) / 1(b) and the
-  curves behind them.
-* `improvement_vs_dopt_paired.csv`: paired per-draw improvement of the
-  proposed designs over greedy D-optimal, interpolated to the same
-  cardinality (the "66/69"-type statistics of Sec. 5 are computed the same
-  way for every baseline; the script prints them, binned by cardinality).
-* `fashion_masks.{pdf,png}`: Fig. 1(c) (masks and reconstructions at
-  M_1 = 40, split 0). This step re-solves a few elastic nets and needs the
-  Fashion-MNIST snapshot.
+* `nmse_vs_cardinality.{pdf,png}` and `nmse_vs_cardinality_data.csv`: median test NMSE versus deployed cardinality for every method (Fig. 1(a) / 1(b)) and the curves behind them.
+* `improvement_vs_dopt_paired.csv`: paired per-seed improvement of the proposed designs over greedy D-optimal selection, interpolated to the same cardinality. The scripts print the same statistic for every baseline, binned by cardinality (the numbers of Sec. 5 and Table 1).
+* `fashion_masks.{pdf,png}`: selected pixels and reconstructions of a few test images (Fig. 1(c)).
 
-`python scripts/aggregate_results.py` builds a single `results/all_results.csv`
-from all per-run directories (regenerated, never appended to).
+`python scripts/aggregate_results.py` builds a single `results/all_results.csv` from all per-run directories.
 
-## 3. Re-running the experiments from scratch
+## 6. Configuration reference
 
-Both batches are "one price-homotopy run per seed" plus baselines on a grid
-of cardinalities. Use the time-budgeted, resumable runner: it processes grid
-points in a deterministic order, skips the ones that already have a
-`metrics.csv`, and stops cleanly when the time budget is about to be
-exceeded. Re-invoke it until it prints `ALL DONE`:
+The YAML files are validated by `src/config/loading.py`. The most relevant blocks:
 
-    python scripts/run_c1_chunk.py --config configs/c1_synth_frontier_10seed.yaml --max-seconds 600
-    python scripts/run_c1_chunk.py --config configs/rf_fashion_frontier_lr01_10seed.yaml --max-seconds 600
+| Block | Keys | Meaning |
+|---|---|---|
+| `problem` | `generator`, `D`, `M`, `N_train`, `N_val`, `N_test`, `sparsity`, `snr_db`, `generator_options` | Data generator (`structured_blocks` or `digits_dct`), dimensions, number of instances per split, SNR |
+| `estimator` | `mu_grid`, `lambda_ratio_grid`, `solver_max_iter`, `solver_tol` | Elastic-net parameters; `lambda = lambda_ratio * lambda_max` |
+| `methods` | list | Any of `random`, `leverage`, `dopt_greedy`, `aopt_greedy`, `diagnostic_full_design`, `proposed_ivb_l1` |
+| `baseline_M0_grid` | list | Cardinalities at which the baselines are evaluated |
+| `design_l1` | `price_kind`, `price_theta`, `eta_c`, `price_ramp_start`, `price_ramp_ratio`, `price_ramp_len`, `price_iters_per_stage`, `tau_w` | Concave price (`theta`), geometric price ramp, iterations per price stage, support threshold of the deployed design |
+| `proposed` | `gamma_schedule`, `outer_iters_per_stage`, `alpha_init`, `inner`, `avalanche_frac`, `max_price_bisect`, ... | Penalty continuation, proximal-gradient steps, inner-solve schedule `T_k = T0 + c log(k+1)`, anti-avalanche safeguard |
+| `seeds` | list | One independent draw / split per seed |
 
-Two workers can share a batch with `--stride 2 --offset 0` and
-`--stride 2 --offset 1` (set `OMP_NUM_THREADS=1` per worker so they do not
-compete for cores). Cost: the `runtime` column of each `metrics.csv` records
-the measured time per grid point; summed over the shipped results, the
-synthetic batch is under one CPU-hour and the Fashion-MNIST batch about two
-CPU-hours (the baselines, which need one solve per cardinality, take most of
-it; the 10 proposed price-homotopy runs take about 20 minutes per batch).
+`design_mode="budget_equality"` in `src/methods/proposed.py` is a budgeted variant with an equality cardinality constraint that is not used in this paper.
 
-To re-run from scratch move or delete the shipped `results/<experiment>/`
-first; otherwise the runner will find the completed points and skip them.
-`scripts/run_experiment.py` is a plain single-pass alternative (no resume),
-kept for the smoke tests:
+## 7. Conventions
 
-    python scripts/run_experiment.py --config configs/c1_tiny_debug.yaml
+* **Seeds.** Data generation, the random baseline and the proposed method use independent random streams derived from the seed, so adding a method never changes the data or the other methods' designs.
+* **Noise.** `SNR_dB = 10 log10(signal_power / sigma^2)`, with `signal_power` the mean of `(X beta)^2` over all candidate rows and all instances. `R = sigma^2 I` is passed explicitly.
+* **Regularization level.** `lambda_max` is computed on training data with the uniform design `w = (M0/M) 1` of the config's nominal `M0`, as the median over training instances of `||X^T D_w R^{-1} y_n||_inf`.
+* **Deployed design.** A price stage is deployed as the binary support `1[w > tau_w]`; the box projection produces exact zeros. Baselines select exactly `M0` measurements.
+* **Metrics.** Per-instance NMSE `||beta_hat - beta||^2 / ||beta||^2` on test instances, aggregated by the median; medians and interquartile ranges over seeds in the figures. Runs where the deployed estimate collapsed to zero on some test instances are flagged `status = zero_beta_hat` and kept.
+* **Results are never overwritten.** Each invocation creates new run directories tagged with a timestamp; aggregates are always rebuilt from the per-run files.
 
-## 4. What is where
+## 8. Citation
 
-    configs/    the four YAML configs (two paper runs, two smoke tests)
-    data/       Fashion-MNIST snapshot (70000 x 28 x 28 uint8) + provenance README
-    results/    raw outputs of the two paper batches (about 21 MB)
-    figures/    created by scripts/make_c1_figures.py
-    scripts/    run_c1_chunk.py (resumable runner), run_experiment.py (single pass),
-                make_c1_figures.py (figures + paired statistics), aggregate_results.py
-    src/        the modules the pipeline needs (imported as `src.*`)
-    tests/      test_c1_sparsity.py: price semantics, box feasibility, exact zeros,
-                cardinality monotone in the price, budget mode unchanged, pooling
+```bibtex
+@inproceedings{marques2027sparse,
+  title     = {Sparse Experimental Design for Nonsmooth Estimators via Bilevel Optimization},
+  author    = {Marques, Antonio G. and Rey, Samuel},
+  booktitle = {IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)},
+  year      = {2027}
+}
+```
 
-Main code paths, in the order they are used:
-
-* `src/pipelines/c1_sparsity.py`: the experiment pipeline. For each seed it
-  generates the data, runs the baselines at every cardinality of
-  `baseline_M0_grid`, runs the proposed price homotopy once, and evaluates
-  every price stage whose deployed cardinality changed (validation and
-  test), with the same deployed elastic net for all methods.
-* `src/methods/proposed.py`: the single-loop value-function penalty method
-  (`run_proposed`). The ICASSP variant is `design_mode="box_l1"` with
-  `price_kind="concave"` (Alg. 1 of the paper: gamma continuation price-free
-  from w = 1, then geometric price ramp with the anti-avalanche rollback).
-  `design_mode="budget_equality"` is the journal's budgeted variant and is
-  not used here.
-* `src/methods/baselines.py`: random, leverage (row norm), greedy D- and
-  A-optimal selection.
-* `src/problems/sparse_linear.py`: data generators and the `lambda_max`
-  convention (`generate_sparse_linear_blocks` is the synthetic test case);
-  `src/problems/digits_dct.py`: Fashion-MNIST in the 2-D DCT basis with 2x2
-  average pooling (14 x 14, D = M = 196).
-* `src/solvers/lasso.py`, `src/solvers/ridge.py`: weighted elastic-net (FISTA,
-  batched) and ridge solvers used by the lower level and by the evaluation.
-* `src/evaluation/evaluate.py`, `src/evaluation/metrics.py`: deployed
-  evaluation on test instances (median NMSE etc.; `status = zero_beta_hat`
-  flags runs where the deployed estimate collapsed to zero on some test
-  instance, which are kept in the aggregation).
-* `src/config/loading.py`, `src/utils/*`: config validation, seeding
-  (`SeedSequence` streams for data / random baseline / restarts), result
-  I/O and logging.
-
-## 5. Conventions worth knowing
-
-* Seeds 0-9 are the 10 "draws" (synthetic) / "splits" (Fashion-MNIST) of the
-  paper. Data generation, the random baseline and the proposed method use
-  independent random streams, so adding a method does not change the data.
-* Medians over test instances per run; medians and IQR over seeds in the
-  figures.
-* `lambda_max` is computed on training data only, with the uniform design
-  `w = (M0/M) * 1` of the config's nominal `M0`; `lambda = lambda_ratio * lambda_max`.
-* The deployed design of a price stage is `1[w > tau_w]` (exact zeros come
-  from the box projection); baselines are evaluated at the cardinalities in
-  `baseline_M0_grid` and interpolated (log-linearly) to the proposed
-  cardinalities for the paired comparisons.
-
-Package assembled on 2026-09-07 from the main repository; the module copies
-are verbatim (only `scripts/run_experiment.py` was trimmed to register the
-`c1_sparsity` pipeline alone).
+Work supported by the Spanish AEI (grants PID2022-136887NB-I00 and PID2025-170000NB-I00) and the Community of Madrid (IDEA-CM TEC-2024/COM-89, URJC-F1180, Ellis Madrid Unit). Claude AI was used to assist in coding the simulations.
