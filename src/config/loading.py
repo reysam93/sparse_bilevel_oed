@@ -126,6 +126,11 @@ def validate_config(config: dict) -> None:
                 if key not in proposed:
                     raise ValueError(
                         f"config['proposed'] missing key: {key}")
+            ul = proposed.get("ul_measurements", "train")
+            if ul not in ("train", "paired"):
+                raise ValueError(
+                    "config['proposed']['ul_measurements'] must be 'train' "
+                    f"or 'paired', got {ul!r}")
         baseline = [m for m in config["methods"]
                     if m not in ("proposed_ivb_l1",)]
         if baseline and "baseline_M0_grid" not in config:

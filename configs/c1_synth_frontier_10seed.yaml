@@ -63,5 +63,6 @@ proposed:
   gap_scale_mode: noise_normalized
   polish_gamma_factors: []
   n_restarts: 1
+  ul_measurements: paired   # UL scores a paired second acquisition of the training scenes (paper eq. 4); "train" reuses the LL measurements
 
 timeout_seconds: 1800

@@ -33,6 +33,12 @@ class SparseLinearData:
     lambda_max: float             # training-only, uniform feasible design
     meta: dict = field(default_factory=dict)
     # Second, independent noisy acquisition of the TRAINING scenes (same X,
+    # same beta_train, fresh noise): the validation measurements y_{v,n} of
+    # the UL criterion (ICASSP paper, eq. 4). The LL sees Y_train, the UL
+    # scores the free copies on Y_train_ul. Drawn AFTER the train/val/test
+    # noise so that those splits are bit-for-bit unchanged (2026-09-18).
+    Y_train_ul: np.ndarray | None = None   # (N_train, M)
+    # Second, independent noisy acquisition of the TRAINING scenes (same X,
     # same beta_train, fresh noise). It is the validation measurement
     # y_{v,n} of the paper's UL criterion (ICASSP eq. 4): the LL sees
     # Y_train, the UL scores the free copies on Y_train_ul. Drawn AFTER the
@@ -80,6 +86,10 @@ def _finalize(rng, X, beta_train, beta_val, beta_test, M0, snr_db, meta):
         split: c + sigma * rng.standard_normal(c.shape)
         for split, c in clean.items()
     }
+    # Paired UL acquisition of the training scenes (see SparseLinearData).
+    # Must stay AFTER the loop above: it consumes the generator last.
+    noisy["train_ul"] = clean["train"] + sigma * rng.standard_normal(
+        clean["train"].shape)
     R_diag = sigma**2 * np.ones(X.shape[0])
     lambda_max = compute_lambda_max(X, noisy["train"], R_diag, M0)
     return SparseLinearData(
@@ -88,6 +98,7 @@ def _finalize(rng, X, beta_train, beta_val, beta_test, M0, snr_db, meta):
         Y_train=noisy["train"], Y_val=noisy["val"], Y_test=noisy["test"],
         R_diag=R_diag, sigma=sigma, lambda_max=lambda_max,
         meta={**meta, "signal_power": signal_power},
+        Y_train_ul=noisy["train_ul"],
     )
 
 

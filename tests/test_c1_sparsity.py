@@ -112,6 +112,70 @@ def test_pool2d_average_pooling():
     assert np.isclose(pooled[1, 1, 1], np.mean(imgs[1, 2:, 2:]))
 
 
+def test_generators_provide_paired_ul_acquisition():
+    """Y_train_ul: same clean signal as Y_train, independent noise of the
+    same level, and the train/val/test splits are deterministic."""
+    from src.problems.sparse_linear import generate_sparse_linear_blocks
+
+    kw = dict(D=20, M=60, M0=10, N_train=32, N_val=4, N_test=4, sparsity=3,
+              snr_db=20.0)
+    d1 = generate_sparse_linear_blocks(np.random.default_rng(3), **kw)
+    d2 = generate_sparse_linear_blocks(np.random.default_rng(3), **kw)
+    assert np.array_equal(d1.Y_train, d2.Y_train)
+    assert np.array_equal(d1.Y_test, d2.Y_test)
+    assert d1.Y_train_ul.shape == d1.Y_train.shape
+    e_ll = d1.Y_train - d1.beta_train @ d1.X.T
+    e_ul = d1.Y_train_ul - d1.beta_train @ d1.X.T
+    assert not np.allclose(e_ll, e_ul)
+    assert abs(e_ul.std() / d1.sigma - 1.0) < 0.1
+    assert abs(np.corrcoef(e_ll.ravel(), e_ul.ravel())[0, 1]) < 0.1
+
+
+def test_run_proposed_ul_uses_paired_measurements():
+    """With Y_ul the UL criterion is evaluated on Y_ul (not on the LL data),
+    the design changes, and a shape mismatch is rejected."""
+    from src.methods.proposed import _inner_solve_all, _phi_pred
+
+    X, Y, Yv, beta, R = _tiny_instance()
+    M = X.shape[0]
+    params = _params(1.0, iters=4)
+    res_train = run_proposed(X, Y, R, lam=0.05, mu=0.1, M0=M, params=params,
+                             w0=np.ones(M), criterion="ivb",
+                             design_mode="box_l1")
+    res_pair = run_proposed(X, Y, R, lam=0.05, mu=0.1, M0=M, params=params,
+                            w0=np.ones(M), criterion="ivb",
+                            design_mode="box_l1", Y_ul=Yv)
+    # Phi logged at the first iteration is evaluated at the initial free
+    # copies B0 = beta*(w0), so it must equal the prediction risk on Y_ul.
+    B0 = _inner_solve_all(X, Y, np.ones(M), 0.05, 0.1, R,
+                          np.zeros((Y.shape[0], X.shape[1])),
+                          params["init_solve_steps"])
+    assert np.isclose(res_pair.curves[0]["Phi"], _phi_pred(X, Yv, B0))
+    assert np.isclose(res_train.curves[0]["Phi"], _phi_pred(X, Y, B0))
+    assert not np.allclose(res_train.w_relaxed, res_pair.w_relaxed)
+    with pytest.raises(ValueError):
+        run_proposed(X, Y, R, lam=0.05, mu=0.1, M0=M, params=params,
+                     w0=np.ones(M), criterion="ivb", design_mode="box_l1",
+                     Y_ul=Yv[:-1])
+
+
+def test_config_rejects_unknown_ul_measurements():
+    from pathlib import Path
+
+    import yaml
+
+    from src.config.loading import validate_config
+
+    cfg = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / "configs" / "c1_tiny_debug.yaml")
+        .read_text(encoding="utf-8"))
+    assert cfg["proposed"]["ul_measurements"] == "paired"
+    validate_config(cfg)
+    cfg["proposed"]["ul_measurements"] = "validation"
+    with pytest.raises(ValueError):
+        validate_config(cfg)
+
+
 def test_digits_dataset_option_default_matches_legacy():
     from src.problems.digits_dct import generate_digits_dct
 

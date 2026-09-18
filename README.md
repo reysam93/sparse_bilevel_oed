@@ -15,7 +15,7 @@ Main ingredients, with the corresponding modules:
 * **Lower level (LL).** For each training instance `n`, the design-weighted elastic net
   `beta_n*(w) = argmin_beta  1/2 sum_i (w_i / R_ii) (y_{n,i} - x_i^T beta)^2 + mu/2 ||beta||^2 + lambda ||beta||_1`,
   where `w in [0,1]^M` are continuous acquisition weights. Solved by FISTA (`src/solvers/lasso.py`).
-* **Upper level (UL).** The prediction risk of the reconstructions over the `M` candidate measurements, plus a **concave sparsity price** `eta * sum_i w_i / (w_i + theta)` on the weights. No cardinality budget is imposed: a measurement survives only if its estimator-aware value exceeds its price, so *how many* measurements are kept is an outcome of the optimization.
+* **Upper level (UL).** The validation prediction risk of the reconstructions: for every training scene, an independent second acquisition of its `M` candidate measurements (same `X`, fresh noise) is generated, the LL only sees the first one and the UL scores the reconstructions on the second (`proposed.ul_measurements: paired` in the configs). To this a **concave sparsity price** `eta * sum_i w_i / (w_i + theta)` on the weights is added. No cardinality budget is imposed: a measurement survives only if its estimator-aware value exceeds its price, so *how many* measurements are kept is an outcome of the optimization.
 * **Single-loop algorithm.** A value-function penalty reformulation replaces the LL optimality constraint by a penalized optimality gap. The resulting single-level problem is solved by proximal gradient on the design `w` and on free reconstruction copies `B`, using only inexact warm-started LL solves; no hypergradient or differentiation through the nonsmooth solution map is needed (`src/methods/proposed.py`, function `run_proposed` with `design_mode="box_l1"`).
 * **Price homotopy.** A continuation in the penalty parameter `gamma` is run price-free from the full design, then the price `eta` is ramped geometrically. Every price stage whose deployed cardinality changes yields one design, so a single run traces the whole cardinality-vs-accuracy frontier. An adaptive safeguard rolls back and bisects the price when a stage prunes too many measurements at once.
 * **Baselines.** Random selection, leverage (row-norm) sampling, and greedy D- and A-optimal selection on the information matrix (`src/methods/baselines.py`).
@@ -93,8 +93,15 @@ python -c "import sys; sys.path[:0]=['.','scripts']; from make_c1_figures import
 Outputs go to `figures/<experiment>/`:
 
 * `nmse_vs_cardinality.{pdf,png}` and `nmse_vs_cardinality_data.csv`: median test NMSE versus deployed cardinality for every method (Fig. 1(a) / 1(b)) and the curves behind them.
-* `improvement_vs_dopt_paired.csv`: paired per-seed improvement of the proposed designs over greedy D-optimal selection, interpolated to the same cardinality. The scripts print the same statistic for every baseline, binned by cardinality (the numbers of Sec. 5 and Table 1).
+* `improvement_vs_dopt_paired.csv`: paired per-seed improvement of the proposed designs over greedy D-optimal selection, interpolated to the same cardinality.
 * `fashion_masks.{pdf,png}`: selected pixels and reconstructions of a few test images (Fig. 1(c)).
+
+All numbers quoted in Sec. 5 of the paper (number of frontier designs and their cardinality range, median paired NMSE reduction with IQR and win counts per cardinality bin for every baseline, minimum cardinality reached, zero-estimate collapses, Table 1) are printed by
+
+```bash
+python scripts/paper_numbers.py --experiment c1_synth_frontier_10seed
+python scripts/paper_numbers.py --experiment rf_fashion_frontier_lr01_10seed
+```
 
 `python scripts/aggregate_results.py` builds a single `results/all_results.csv` from all per-run directories.
 
@@ -110,6 +117,7 @@ The YAML files are validated by `src/config/loading.py`. The most relevant block
 | `baseline_M0_grid` | list | Cardinalities at which the baselines are evaluated |
 | `design_l1` | `price_kind`, `price_theta`, `eta_c`, `price_ramp_start`, `price_ramp_ratio`, `price_ramp_len`, `price_iters_per_stage`, `tau_w` | Concave price (`theta`), geometric price ramp, iterations per price stage, support threshold of the deployed design |
 | `proposed` | `gamma_schedule`, `outer_iters_per_stage`, `alpha_init`, `inner`, `avalanche_frac`, `max_price_bisect`, ... | Penalty continuation, proximal-gradient steps, inner-solve schedule `T_k = T0 + c log(k+1)`, anti-avalanche safeguard |
+| `proposed.ul_measurements` | `paired` (paper) or `train` | Measurements scored by the UL: an independent paired acquisition of the training scenes, or the LL measurements themselves |
 | `seeds` | list | One independent draw / split per seed |
 
 `design_mode="budget_equality"` in `src/methods/proposed.py` is a budgeted variant with an equality cardinality constraint that is not used in this paper.
