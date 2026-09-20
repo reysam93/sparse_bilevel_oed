@@ -1,5 +1,12 @@
-# C1 synthetic frontier, VERSION 2: heterogeneous sensor energies and
-# correlated (redundant) sensors.
+# =============================================================================
+# EXPERIMENT 3 (variant, not in the paper): synthetic case, VERSION 2, with
+# heterogeneous sensor energies and correlated (redundant) sensors.
+#
+# WHAT IS RUN. Identical protocol to c1_synth_frontier_10seed (baselines on a
+# grid of cardinalities, one price homotopy per seed, common deployed
+# estimator on 512 test instances, paired upper-level acquisition). Only the
+# sensing matrix X changes, as described next. Synthetic data only; there is
+# no Fashion-MNIST counterpart of this variant.
 #
 # DATA GENERATION (what differs from c1_synth_frontier_10seed):
 #   The original synthetic test case draws the M = 240 sensing rows in four

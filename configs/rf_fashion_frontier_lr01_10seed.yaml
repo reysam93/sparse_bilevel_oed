@@ -1,8 +1,35 @@
-# RF Fashion-MNIST frontier (ICASSP Fig. 2): budget-free sparsity-priced
-# IV-B pixel selection, 14x14 pooled images (D = M = 196), orthonormal
-# 2D-DCT basis, local snapshot data/raw/fashion_mnist/. One price-homotopy
-# run per seed (concave price, adaptive bisection); baselines at the
-# baseline_M0_grid cardinalities.
+# =============================================================================
+# EXPERIMENT 2 (paper, Fig. 1b-c and Table 1): pixel selection on Fashion-MNIST.
+#
+# WHAT IS RUN. Same protocol as the synthetic experiment (baselines on a grid
+# of cardinalities, one price-homotopy run per seed, common deployed
+# estimator on 512 test images), with the candidate measurements being the
+# pixels of an image and the unknowns its DCT coefficients.
+#
+# DATA GENERATION (src/problems/digits_dct.py, generate_digits_dct).
+#   Images: the 70000 Fashion-MNIST images (train + test, labels unused) from
+#     the local snapshot data/raw/fashion_mnist/, scaled to [0, 1] and
+#     average-pooled 2x2 to 14x14 pixels. Each seed ("split") draws a random
+#     permutation and takes 128 training, 128 validation and 512 test images.
+#   Signal beta_n: the orthonormal 2-D DCT coefficients of image n (D = 196).
+#     They are compressible rather than exactly sparse.
+#   Sensing matrix X: the 196 x 196 orthonormal 2-D inverse-DCT synthesis
+#     matrix, so that image = X beta and measuring pixel i gives y_i = x_i^T beta.
+#     X is deterministic (identical for all seeds) and orthogonal: all rows
+#     have unit norm and are mutually orthogonal, so energy-based and
+#     information-based criteria cannot distinguish pixels.
+#   Noise: white Gaussian, common variance for all pixels, SNR 30 dB (defined
+#     as in the synthetic case over all pixels and images).
+#   Upper-level measurements (ul_measurements: paired): a second independent
+#     noisy acquisition of each training image (same image, fresh noise) is
+#     scored by the upper level; the lower level uses the first one.
+#   Estimator: elastic net on the DCT coefficients with mu = 0.01 and
+#     lambda = 0.1 * lambda_max (uniform design with nominal M0 = 64).
+#
+# OUTPUT. results/rf_fashion_frontier_lr01_10seed/<run>/metrics.csv; figures
+# (frontier, masks and reconstructions) and Table 1 statistics with
+# scripts/make_c1_figures.py (fashion_main) and scripts/paper_numbers.py.
+# =============================================================================
 experiment: rf_fashion_frontier_lr01_10seed
 pipeline: c1_sparsity
 dataset: fashion_mnist_dct_14x14

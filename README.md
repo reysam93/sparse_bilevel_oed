@@ -73,7 +73,23 @@ Each run writes one directory per method and cardinality under `results/<experim
 | Fig. 1(b)-(c) and Table 1: Fashion-MNIST pixel selection | `configs/rf_fashion_frontier_lr01_10seed.yaml` | `rf_fashion_frontier_lr01_10seed` |
 | Variant (not in the paper): synthetic case with heterogeneous sensor energies (per-sensor gains spanning 20 dB) and clusters of correlated sensors | `configs/c1_synth_frontier_10seed_v2.yaml` | `c1_synth_frontier_10seed_v2` |
 
-The header of `c1_synth_frontier_10seed_v2.yaml` describes exactly how its data generation differs from the paper's synthetic case (generator options `row_gain`, `gain_range_db`, `row_corr`, `rho`, `cluster_size` of `generate_sparse_linear_blocks`).
+Each config file starts with a header that describes the experiment and its data generation in detail; the essentials are summarized here.
+
+**Experiment 1, synthetic sparse linear inverse problem** (`c1_synth_frontier_10seed`). `D = 80` unknowns, `M = 240` candidate measurements. The 80 coordinates form 4 blocks of 20 and the 240 rows of `X` form 4 sensor families of 60: a row of family `f` has i.i.d. Gaussian entries with standard deviation 1 on block `f` and 1/5 elsewhere, and is normalized to unit norm, so each family observes one block well and all rows carry the same energy. Signals have 8 nonzero entries (amplitudes `+/- U[1,2]`), 6 of them in blocks 0-1. White Gaussian noise at 20 dB SNR. 64 training, 64 validation and 512 test scenes per seed; the upper level scores a second, independent acquisition of the training scenes. Elastic net with `mu = 0.1`, `lambda = 0.1 lambda_max`.
+
+**Experiment 2, pixel selection on Fashion-MNIST** (`rf_fashion_frontier_lr01_10seed`). Images are average-pooled to 14x14 (`D = M = 196`) and represented by their orthonormal 2-D DCT coefficients; `X` is the inverse-DCT synthesis matrix, so measuring pixel `i` is one row of `X`. `X` is orthogonal (unit-norm, mutually orthogonal rows), hence energy- and information-based criteria cannot rank pixels. Pixels are observed at 30 dB SNR. Each seed draws 128 training, 128 validation and 512 test images from the 70000-image snapshot; the upper level scores a second noisy acquisition of each training image. Elastic net with `mu = 0.01`, `lambda = 0.1 lambda_max`.
+
+**Experiment 3, synthetic variant v2** (`c1_synth_frontier_10seed_v2`, not in the paper). Same as Experiment 1 except for `X`: (a) after normalization every row is scaled by a per-sensor gain `g_i = 10^(u_i/20)`, `u_i ~ U[-10, 10]` dB, so sensor energies and SNRs span 20 dB and leverage / D- / A-optimal selection have something to rank; (b) within each family, consecutive clusters of 5 rows share a common component with correlation `rho = 0.7`, so sensors of a cluster are nearly redundant. Generator options `row_gain`, `gain_range_db`, `row_corr`, `rho`, `cluster_size` of `generate_sparse_linear_blocks`; their defaults reproduce Experiment 1 exactly.
+
+Every experiment is launched the same way:
+
+```bash
+python scripts/run_c1_chunk.py --config configs/<experiment>.yaml --max-seconds 3600   # repeat until ALL DONE
+python scripts/make_c1_figures.py --experiment <experiment>                              # figures (synthetic)
+python scripts/paper_numbers.py --experiment <experiment>                                # statistics
+```
+
+Results go to `results/<experiment>/`, one directory per grid point, and never overwrite another experiment's results.
 
 Both batches are "one price-homotopy run per seed" plus the baselines on a grid of cardinalities, over 10 seeds. Use the time-budgeted, resumable runner: it processes grid points in a deterministic order, skips those that already have a `metrics.csv`, and stops cleanly when the time budget is about to be exceeded. Re-invoke it until it prints `ALL DONE`:
 
