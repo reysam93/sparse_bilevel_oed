@@ -111,6 +111,10 @@ def generate_digits_dct(
     sigma = float(np.sqrt(signal_power / 10.0 ** (snr_db / 10.0)))
     noisy = {k: c + sigma * rng.standard_normal(c.shape)
              for k, c in clean.items()}
+    # Paired UL acquisition of the training images (same image, fresh
+    # measurement noise); drawn last so train/val/test are unchanged.
+    noisy["train_ul"] = clean["train"] + sigma * rng.standard_normal(
+        clean["train"].shape)
     R_diag = sigma**2 * np.ones(M)
     lambda_max = compute_lambda_max(X, noisy["train"], R_diag, M0)
     return SparseLinearData(
@@ -122,4 +126,5 @@ def generate_digits_dct(
               "N_train": N_train, "N_val": N_val, "N_test": N_test,
               "snr_db": snr_db, "signal_power": signal_power,
               "support_F1_meaningful": False},
+        Y_train_ul=noisy["train_ul"],
     )

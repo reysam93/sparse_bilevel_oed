@@ -15,7 +15,7 @@ Main ingredients, with the corresponding modules:
 * **Lower level (LL).** For each training instance `n`, the design-weighted elastic net
   `beta_n*(w) = argmin_beta  1/2 sum_i (w_i / R_ii) (y_{n,i} - x_i^T beta)^2 + mu/2 ||beta||^2 + lambda ||beta||_1`,
   where `w in [0,1]^M` are continuous acquisition weights. Solved by FISTA (`src/solvers/lasso.py`).
-* **Upper level (UL).** The prediction risk of the reconstructions over the `M` candidate measurements, plus a **concave sparsity price** `eta * sum_i w_i / (w_i + theta)` on the weights. No cardinality budget is imposed: a measurement survives only if its estimator-aware value exceeds its price, so *how many* measurements are kept is an outcome of the optimization.
+* **Upper level (UL).** The validation prediction risk of the reconstructions: for every training scene, an independent second acquisition of its `M` candidate measurements (same `X`, fresh noise) is generated, the LL only sees the first one and the UL scores the reconstructions on the second (`proposed.ul_measurements: paired` in the configs). To this a **concave sparsity price** `eta * sum_i w_i / (w_i + theta)` on the weights is added. No cardinality budget is imposed: a measurement survives only if its estimator-aware value exceeds its price, so *how many* measurements are kept is an outcome of the optimization.
 * **Single-loop algorithm.** A value-function penalty reformulation replaces the LL optimality constraint by a penalized optimality gap. The resulting single-level problem is solved by proximal gradient on the design `w` and on free reconstruction copies `B`, using only inexact warm-started LL solves; no hypergradient or differentiation through the nonsmooth solution map is needed (`src/methods/proposed.py`, function `run_proposed` with `design_mode="box_l1"`).
 * **Price homotopy.** A continuation in the penalty parameter `gamma` is run price-free from the full design, then the price `eta` is ramped geometrically. Every price stage whose deployed cardinality changes yields one design, so a single run traces the whole cardinality-vs-accuracy frontier. An adaptive safeguard rolls back and bisects the price when a stage prunes too many measurements at once.
 * **Baselines.** Random selection, leverage (row-norm) sampling, and greedy D- and A-optimal selection on the information matrix (`src/methods/baselines.py`).
@@ -71,6 +71,25 @@ Each run writes one directory per method and cardinality under `results/<experim
 |---|---|---|
 | Fig. 1(a): synthetic sparse linear problem | `configs/c1_synth_frontier_10seed.yaml` | `c1_synth_frontier_10seed` |
 | Fig. 1(b)-(c) and Table 1: Fashion-MNIST pixel selection | `configs/rf_fashion_frontier_lr01_10seed.yaml` | `rf_fashion_frontier_lr01_10seed` |
+| Variant (not in the paper): synthetic case with heterogeneous sensor energies (per-sensor gains spanning 20 dB) and clusters of correlated sensors | `configs/c1_synth_frontier_10seed_v2.yaml` | `c1_synth_frontier_10seed_v2` |
+
+Each config file starts with a header that describes the experiment and its data generation in detail; the essentials are summarized here.
+
+**Experiment 1, synthetic sparse linear inverse problem** (`c1_synth_frontier_10seed`). `D = 80` unknowns, `M = 240` candidate measurements. The 80 coordinates form 4 blocks of 20 and the 240 rows of `X` form 4 sensor families of 60: a row of family `f` has i.i.d. Gaussian entries with standard deviation 1 on block `f` and 1/5 elsewhere, and is normalized to unit norm, so each family observes one block well and all rows carry the same energy. Signals have 8 nonzero entries (amplitudes `+/- U[1,2]`), 6 of them in blocks 0-1. White Gaussian noise at 20 dB SNR. 64 training, 64 validation and 512 test scenes per seed; the upper level scores a second, independent acquisition of the training scenes. Elastic net with `mu = 0.1`, `lambda = 0.1 lambda_max`.
+
+**Experiment 2, pixel selection on Fashion-MNIST** (`rf_fashion_frontier_lr01_10seed`). Images are average-pooled to 14x14 (`D = M = 196`) and represented by their orthonormal 2-D DCT coefficients; `X` is the inverse-DCT synthesis matrix, so measuring pixel `i` is one row of `X`. `X` is orthogonal (unit-norm, mutually orthogonal rows), hence energy- and information-based criteria cannot rank pixels. Pixels are observed at 30 dB SNR. Each seed draws 128 training, 128 validation and 512 test images from the 70000-image snapshot; the upper level scores a second noisy acquisition of each training image. Elastic net with `mu = 0.01`, `lambda = 0.1 lambda_max`.
+
+**Experiment 3, synthetic variant v2** (`c1_synth_frontier_10seed_v2`, not in the paper). Same as Experiment 1 except for `X`: (a) after normalization every row is scaled by a per-sensor gain `g_i = 10^(u_i/20)`, `u_i ~ U[-10, 10]` dB, so sensor energies and SNRs span 20 dB and leverage / D- / A-optimal selection have something to rank; (b) within each family, consecutive clusters of 5 rows share a common component with correlation `rho = 0.7`, so sensors of a cluster are nearly redundant. Generator options `row_gain`, `gain_range_db`, `row_corr`, `rho`, `cluster_size` of `generate_sparse_linear_blocks`; their defaults reproduce Experiment 1 exactly.
+
+Every experiment is launched the same way:
+
+```bash
+python scripts/run_c1_chunk.py --config configs/<experiment>.yaml --max-seconds 3600   # repeat until ALL DONE
+python scripts/make_c1_figures.py --experiment <experiment>                              # figures (synthetic)
+python scripts/paper_numbers.py --experiment <experiment>                                # statistics
+```
+
+Results go to `results/<experiment>/`, one directory per grid point, and never overwrite another experiment's results.
 
 Both batches are "one price-homotopy run per seed" plus the baselines on a grid of cardinalities, over 10 seeds. Use the time-budgeted, resumable runner: it processes grid points in a deterministic order, skips those that already have a `metrics.csv`, and stops cleanly when the time budget is about to be exceeded. Re-invoke it until it prints `ALL DONE`:
 
@@ -93,8 +112,15 @@ python -c "import sys; sys.path[:0]=['.','scripts']; from make_c1_figures import
 Outputs go to `figures/<experiment>/`:
 
 * `nmse_vs_cardinality.{pdf,png}` and `nmse_vs_cardinality_data.csv`: median test NMSE versus deployed cardinality for every method (Fig. 1(a) / 1(b)) and the curves behind them.
-* `improvement_vs_dopt_paired.csv`: paired per-seed improvement of the proposed designs over greedy D-optimal selection, interpolated to the same cardinality. The scripts print the same statistic for every baseline, binned by cardinality (the numbers of Sec. 5 and Table 1).
+* `improvement_vs_dopt_paired.csv`: paired per-seed improvement of the proposed designs over greedy D-optimal selection, interpolated to the same cardinality.
 * `fashion_masks.{pdf,png}`: selected pixels and reconstructions of a few test images (Fig. 1(c)).
+
+All numbers quoted in Sec. 5 of the paper (number of frontier designs and their cardinality range, median paired NMSE reduction with IQR and win counts per cardinality bin for every baseline, minimum cardinality reached, zero-estimate collapses, Table 1) are printed by
+
+```bash
+python scripts/paper_numbers.py --experiment c1_synth_frontier_10seed
+python scripts/paper_numbers.py --experiment rf_fashion_frontier_lr01_10seed
+```
 
 `python scripts/aggregate_results.py` builds a single `results/all_results.csv` from all per-run directories.
 
@@ -110,6 +136,7 @@ The YAML files are validated by `src/config/loading.py`. The most relevant block
 | `baseline_M0_grid` | list | Cardinalities at which the baselines are evaluated |
 | `design_l1` | `price_kind`, `price_theta`, `eta_c`, `price_ramp_start`, `price_ramp_ratio`, `price_ramp_len`, `price_iters_per_stage`, `tau_w` | Concave price (`theta`), geometric price ramp, iterations per price stage, support threshold of the deployed design |
 | `proposed` | `gamma_schedule`, `outer_iters_per_stage`, `alpha_init`, `inner`, `avalanche_frac`, `max_price_bisect`, ... | Penalty continuation, proximal-gradient steps, inner-solve schedule `T_k = T0 + c log(k+1)`, anti-avalanche safeguard |
+| `proposed.ul_measurements` | `paired` (paper) or `train` | Measurements scored by the UL: an independent paired acquisition of the training scenes, or the LL measurements themselves |
 | `seeds` | list | One independent draw / split per seed |
 
 `design_mode="budget_equality"` in `src/methods/proposed.py` is a budgeted variant with an equality cardinality constraint that is not used in this paper.

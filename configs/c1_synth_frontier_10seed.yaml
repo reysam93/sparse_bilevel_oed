@@ -1,9 +1,42 @@
-# C1 synthetic frontier (ICASSP Fig. 1): budget-free sparsity-priced IV-B
-# design on the E1 structured-blocks instance, strong-Lasso regime.
-# ONE run per seed: price-free gamma continuation (frozen configuration),
-# then a geometric concave-price micro-ramp at gamma_final; every price
-# stage with a new deployed cardinality is a frontier point. Baselines are
-# evaluated at the baseline_M0_grid cardinalities.
+# =============================================================================
+# EXPERIMENT 1 (paper, Fig. 1a): synthetic sparse linear inverse problem.
+#
+# WHAT IS RUN. For each of the 10 seeds ("draws") the pipeline generates the
+# data below, runs the classical baselines (random, leverage, greedy D- and
+# A-optimal) at every cardinality of baseline_M0_grid, and runs the proposed
+# price homotopy ONCE: a price-free continuation in the penalty parameter
+# gamma from the full design, then a geometric ramp of the concave sparsity
+# price. Every price stage whose deployed cardinality changes yields one
+# design of the cardinality-vs-accuracy frontier. All designs are evaluated
+# with the same deployed elastic net on the 512 independent test instances.
+#
+# DATA GENERATION (src/problems/sparse_linear.py, generate_sparse_linear_blocks).
+#   Signal dimension D = 80, M = 240 candidate measurements (rows of X).
+#   Sensing matrix X: the 80 coordinates form 4 contiguous blocks of 20; the
+#     240 rows form 4 "sensor families" of 60. Row i of family f has i.i.d.
+#     Gaussian entries with standard deviation 1 on the coordinates of block f
+#     and 1/5 (variance 1/25) elsewhere, and is then normalized to unit norm.
+#     Each family therefore observes one block well; all rows carry the same
+#     energy and are mutually independent. X is redrawn for every seed.
+#   Signals beta_n: 8 nonzero entries with amplitudes +/- U[1, 2]; 6 of the 8
+#     are placed in blocks 0-1 (the "frequent" blocks), the other 2 uniformly
+#     over the remaining coordinates.
+#   Noise: white Gaussian, common variance sigma^2 for all sensors, set so that
+#     the SNR (mean of (X beta)^2 over all rows and instances / sigma^2) is 20 dB.
+#   Instances: 64 training scenes (the lower level fits them), 64 validation
+#     scenes (monitoring only) and 512 test scenes (final evaluation).
+#   Upper-level measurements (ul_measurements: paired): for every training
+#     scene a SECOND, independent noisy acquisition of its 240 measurements is
+#     generated; the lower level sees the first acquisition, the upper level
+#     scores the reconstructions on the second (paper eq. 4).
+#   Estimator: elastic net with mu = 0.1 and lambda = 0.1 * lambda_max, where
+#     lambda_max is computed on training data with the uniform design
+#     w = (M0/M) 1 (M0 = 40 is nominal and used only for that purpose).
+#
+# OUTPUT. results/c1_synth_frontier_10seed/<run>/metrics.csv, one directory
+# per (method, seed, cardinality); figures and paper statistics with
+# scripts/make_c1_figures.py and scripts/paper_numbers.py.
+# =============================================================================
 experiment: c1_synth_frontier_10seed
 pipeline: c1_sparsity
 dataset: sparse_linear_structured_blocks_e1
@@ -63,5 +96,6 @@ proposed:
   gap_scale_mode: noise_normalized
   polish_gamma_factors: []
   n_restarts: 1
+  ul_measurements: paired   # UL scores a paired second acquisition of the training scenes (paper eq. 4); "train" reuses the LL measurements
 
 timeout_seconds: 1800

@@ -1,0 +1,100 @@
+# =============================================================================
+# EXPERIMENT 3 (variant, not in the paper): synthetic case, VERSION 2, with
+# heterogeneous sensor energies and correlated (redundant) sensors.
+#
+# WHAT IS RUN. Identical protocol to c1_synth_frontier_10seed (baselines on a
+# grid of cardinalities, one price homotopy per seed, common deployed
+# estimator on 512 test instances, paired upper-level acquisition). Only the
+# sensing matrix X changes, as described next. Synthetic data only; there is
+# no Fashion-MNIST counterpart of this variant.
+#
+# DATA GENERATION (what differs from c1_synth_frontier_10seed):
+#   The original synthetic test case draws the M = 240 sensing rows in four
+#   families of 60 (unit variance on the family's own block of 20 signal
+#   coordinates, variance 1/25 elsewhere), independently of each other, and
+#   then normalizes every row to unit norm. As a consequence all candidate
+#   measurements carry exactly the same energy (so energy-based criteria such
+#   as leverage cannot rank them) and no two sensors are redundant.
+#   This version keeps the four families, the block structure and the
+#   structured sparse signals, and adds two ingredients:
+#   (A2) per-sensor gains: after row normalization, row i is scaled by
+#        g_i = 10^(u_i/20) with u_i ~ U[-10, +10] dB (gain_range_db = 20), so
+#        the per-sensor SNR spans 20 dB uniformly in dB while the noise
+#        variance stays common to all sensors. The nominal snr_db is now an
+#        average over sensors.
+#   (B2) correlated sensors: within each family, consecutive clusters of
+#        cluster_size = 5 rows share a common component,
+#        x_i = sqrt(rho) c_g + sqrt(1 - rho) z_i with rho = 0.7, so sensors of
+#        the same cluster are strongly correlated (nearly redundant) while
+#        sensors of different clusters remain independent.
+#   Everything else (estimator, baselines, price homotopy, evaluation,
+#   seeds) is identical to c1_synth_frontier_10seed. Results are written to
+#   results/c1_synth_frontier_10seed_v2/ and never touch the original ones.
+experiment: c1_synth_frontier_10seed_v2
+pipeline: c1_sparsity
+dataset: sparse_linear_structured_blocks_e1_v2
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+problem:
+  generator: structured_blocks
+  D: 80
+  M: 240
+  M0: 40            # nominal, used only for the lambda_max uniform design
+  N_train: 64
+  N_val: 64
+  N_test: 512
+  sparsity: 8
+  snr_db: 20.0
+  generator_options:
+    n_blocks: 4
+    block_gain: 5.0
+    frequent_blocks: [0, 1]
+    frac_frequent: 0.7
+    # --- v2 additions ---
+    row_gain: loguniform
+    gain_range_db: 20.0      # per-sensor power gain uniform in [-10, +10] dB
+    row_corr: cluster
+    rho: 0.7                 # within-cluster row correlation
+    cluster_size: 5          # 12 clusters of 5 sensors per family
+
+estimator:
+  mu_grid: [0.1]
+  lambda_ratio_grid: [0.1]
+  tau_supp: 1.0e-6
+  rho: 1.0e-6
+  solver_max_iter: 2000
+  solver_tol: 1.0e-10
+
+methods: [random, leverage, dopt_greedy, aopt_greedy, diagnostic_full_design, proposed_ivb_l1]
+n_random_repeats: 20
+
+design_l1:
+  eta_c: 1.0
+  price_kind: concave
+  price_theta: 0.1
+  price_ramp_start: 0.05
+  price_ramp_ratio: 1.18
+  price_ramp_len: 40
+  price_iters_per_stage: 20
+  tau_w: 1.0e-3
+
+baseline_M0_grid: [15, 20, 25, 30, 35, 40, 50, 60, 80, 120]
+
+proposed:
+  gamma_schedule: [0.1, 0.3, 1.0, 3.0, 10.0, 30.0]
+  outer_iters_per_stage: 60
+  alpha_init: 0.1
+  backtracking: true
+  max_halvings: 30
+  inner: {mode: log, T0: 10, c: 5.0}
+  diag_inner_steps: 500
+  diag_every: 30
+  init_solve_steps: 1000
+  step_rule: per_block
+  gap_scale_mode: noise_normalized
+  polish_gamma_factors: []
+  n_restarts: 1
+  ul_measurements: paired   # UL scores a paired second acquisition of the training scenes (paper eq. 4); "train" reuses the LL measurements
+
+timeout_seconds: 1800

@@ -235,7 +235,11 @@ def _run_proposed_l1(config, data, seed, mu, lambda_ratio,
     deadline = t0 + timeout
     rows: list[dict] = []
     base = _base_row(config, seed, "proposed_ivb_l1", mu, lam, lambda_ratio)
+    # UL measurements: "paired" = independent second acquisition of the
+    # training scenes (paper eq. 4); "train" = the LL measurements themselves.
+    ul_measurements = str(params.get("ul_measurements", "train"))
     base.update({"criterion": "IV-B",
+                 "ul_measurements": ul_measurements,
                  "eta_l1_c": params["eta_l1_c"],
                  "price_kind": params["price_kind"],
                  "price_theta": params["price_theta"],
@@ -256,6 +260,7 @@ def _run_proposed_l1(config, data, seed, mu, lambda_ratio,
             config["problem"]["M0"], params, np.ones(M),
             criterion="ivb",
             Y_val=data.Y_val, beta_dagger_val=data.beta_val,
+            Y_ul=(data.Y_train_ul if ul_measurements == "paired" else None),
             logger=logger, deadline=deadline,
             regularizer=est.get("regularizer", "l1"),
             design_mode="box_l1",

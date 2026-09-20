@@ -12,7 +12,12 @@ decision in docs/implementation_notes.md):
 
     g_n(w, b) = 0.5 ||D_w^{1/2} R^{-1/2} (y_n - X b)||^2 + 0.5 mu ||b||^2
                 + lam ||b||_1
-    Phi_pred(B) = (1/N) sum_n 0.5 || X B_n - y_n ||^2      (all M rows)
+    Phi_pred(B) = (1/N) sum_n 0.5 || X B_n - y_{v,n} ||^2    (all M rows)
+
+where y_{v,n} are the UL measurements of instance n: by default the same
+vector y_n the LL uses (``Y``), or, when ``Y_ul`` is given, an independent
+paired acquisition of the same scene (the validation pairs of the ICASSP
+paper, eq. 4; produced by the data generators as ``Y_train_ul``).
 
 The value-function gradient uses the residual formula (paper eq. 12):
 
@@ -343,6 +348,9 @@ def run_proposed(
     rho: float = 0.0,                         # spectral reg. of C_hat (IV-C)
     Y_val: np.ndarray | None = None,          # val instances for monitoring
     beta_dagger_val: np.ndarray | None = None,
+    Y_ul: np.ndarray | None = None,           # (N, M) UL measurements of the
+                                              # LL instances; None => Y
+
     logger=None,
     deadline: float | None = None,
     regularizer: str = "l1",
@@ -352,7 +360,13 @@ def run_proposed(
     IV-C-D, IV-C-E; LL regularizer: l1 default, tv for E6)."""
     t0 = time.perf_counter()
     N, M = Y.shape
-    crit = make_criterion(criterion, X, Y, beta_dagger=beta_dagger, rho=rho,
+    # The UL criterion is the ONLY consumer of Y_ul. The LL solves, the
+    # value-function coupling and the price anchor keep using Y.
+    if Y_ul is not None and Y_ul.shape != Y.shape:
+        raise ValueError(
+            f"Y_ul must be paired with Y (same instances): {Y_ul.shape} vs {Y.shape}")
+    crit = make_criterion(criterion, X, Y if Y_ul is None else Y_ul,
+                          beta_dagger=beta_dagger, rho=rho,
                           tau=float(params.get("tau_maxeig", 50.0)))
     reg = _make_regularizer(regularizer)
     if design_mode not in ("budget_equality", "box_l1"):
